@@ -5,10 +5,18 @@
 library(here)
 library(readr)
 library(dplyr)
+library(tidyr)
 library(scales)
 
 # set directory
 setwd(here())
+
+# helper: sum that returns NA (not 0) when every contributing value is NA/suppressed,
+# rather than sum(..., na.rm=TRUE) which silently treats "all missing" as "zero"
+sum_or_na = function(x) {
+  if (all(is.na(x))) return(NA_real_)
+  sum(x, na.rm = TRUE)
+}
 
 ### set up regional look-up table 
 
@@ -49,11 +57,12 @@ crab$weight_landed_lbs = as.numeric(crab$weight_landed_lbs)
 coastwide_crab_catch = crab %>% 
   filter(subarea=="Total") %>% 
   group_by(year) %>% 
-  summarise(coastwide_num_crabs=sum(num_crabs_landed, na.rm=TRUE),
-            coastwide_weight_landed=sum(weight_landed_lbs, na.rm=TRUE),
-            coastwide_num_traps_hauled=sum(num_traps_hauled,na.rm=TRUE),
-            coastwide_vessel_count=sum(vessel_count, na.rm=TRUE)
-            )
+  summarise(coastwide_num_crabs=sum_or_na(num_crabs_landed),
+            coastwide_weight_landed=sum_or_na(weight_landed_lbs),
+            coastwide_num_traps_hauled=sum_or_na(num_traps_hauled),
+            coastwide_vessel_count=sum_or_na(vessel_count)
+  ) %>%
+  complete(year = full_seq(year, 1))
 
 png(here("figures","coastwide_trends_crab.png"),  width = 12, height = 8, units = "in", res = 300, pointsize=14)
 par(mfrow = c(2, 2), mar = c(4, 5.5, 3, 1), mgp = c(4, 0.5, 0))
@@ -77,8 +86,15 @@ dev.off()
 
 ### --- figure 2: crab trends by statistical area --- ###
 
-
 ### option 1: four panel plot with areas ranked highest to lowest average catch ###
+
+# NOTE: this object was missing from the original script (referenced below but never
+# defined) - added here, matching the pattern used for prawn/dive
+catch_by_pfma = crab %>%
+  filter(subarea == "Total") %>%
+  group_by(PFMA, year) %>%
+  summarise(weight_landed_lbs = sum_or_na(weight_landed_lbs), .groups = "drop") %>%
+  complete(PFMA, year = full_seq(year, 1))
 
 # rank PFMAs by average catch, split into 4 groups of 12
 pfma_totals = catch_by_pfma %>%
@@ -122,11 +138,12 @@ catch_by_region_crab = crab %>%
   mutate(PFMA = as.character(PFMA)) %>%
   left_join(region_lookup, by = "PFMA") %>%
   group_by(region, year) %>%
-  summarise(num_crabs = sum(num_crabs_landed, na.rm = TRUE),
-            weight_landed = sum(weight_landed_lbs, na.rm = TRUE),
-            num_traps_hauled = sum(num_traps_hauled, na.rm = TRUE),
-            vessel_count = sum(vessel_count, na.rm = TRUE),
-            .groups = "drop")
+  summarise(num_crabs = sum_or_na(num_crabs_landed),
+            weight_landed = sum_or_na(weight_landed_lbs),
+            num_traps_hauled = sum_or_na(num_traps_hauled),
+            vessel_count = sum_or_na(vessel_count),
+            .groups = "drop") %>%
+  complete(region, year = full_seq(year, 1))
 
 # fix region order & colours (based on avg. weight landed), reused across all panels
 region_order = catch_by_region_crab %>%
@@ -141,7 +158,7 @@ cols = cols_full[(n_extra + 1):length(cols_full)]
 names(cols) = region_order
 
 plot_region_panel = function(data, yvar, ylab, main, show_legend = FALSE, legend_pos = "topleft") {
-  plot(range(data$year), range(data[[yvar]], na.rm = TRUE),
+  plot(range(data$year), range(data[[yvar]], na.rm = TRUE), ylim=c(0,1.2*max(data[[yvar]], na.rm=TRUE)),
        type = "n", xlab = "", ylab = ylab, bty = "l", las = 1, main = main)
   for (r in region_order) {
     dd = data[data$region == r, ]
@@ -205,10 +222,11 @@ prawn$prawn_landed_lbs = as.numeric(prawn$prawn_landed_lbs)
 coastwide_prawn_catch = prawn %>%
   filter(subarea=="Total") %>%
   group_by(year) %>%
-  summarise(coastwide_weight_landed=sum(prawn_landed_lbs, na.rm=TRUE),
-            coastwide_num_traps_hauled=sum(num_traps_hauled, na.rm=TRUE),
-            coastwide_vessel_count=sum(vessel_count, na.rm=TRUE)
-  )
+  summarise(coastwide_weight_landed=sum_or_na(prawn_landed_lbs),
+            coastwide_num_traps_hauled=sum_or_na(num_traps_hauled),
+            coastwide_vessel_count=sum_or_na(vessel_count)
+  ) %>%
+  complete(year = full_seq(year, 1))
 
 png(here("figures","prawn_coastwide_trends.png"), width = 9, height = 3, units = "in", res = 300, pointsize=14)
 par(mfrow = c(1, 3), mar = c(4, 5.5, 3, 1), mgp = c(4, 0.5, 0))
@@ -233,7 +251,8 @@ dev.off()
 catch_by_pfma_prawn = prawn %>%
   filter(subarea == "Total") %>%
   group_by(PFMA, year) %>%
-  summarise(prawn_landed_lbs = sum(prawn_landed_lbs, na.rm = TRUE), .groups = "drop")
+  summarise(prawn_landed_lbs = sum_or_na(prawn_landed_lbs), .groups = "drop") %>%
+  complete(PFMA, year = full_seq(year, 1))
 
 pfma_totals_prawn = catch_by_pfma_prawn %>%
   group_by(PFMA) %>%
@@ -278,10 +297,11 @@ catch_by_region_prawn = prawn %>%
   mutate(PFMA = as.character(PFMA)) %>%
   left_join(region_lookup, by = "PFMA") %>%
   group_by(region, year) %>%
-  summarise(weight_landed = sum(prawn_landed_lbs, na.rm = TRUE),
-            num_traps_hauled = sum(num_traps_hauled, na.rm = TRUE),
-            vessel_count = sum(vessel_count, na.rm = TRUE),
-            .groups = "drop")
+  summarise(weight_landed = sum_or_na(prawn_landed_lbs),
+            num_traps_hauled = sum_or_na(num_traps_hauled),
+            vessel_count = sum_or_na(vessel_count),
+            .groups = "drop") %>%
+  complete(region, year = full_seq(year, 1))
 
 # fix region order & colours (based on avg. weight landed), reused across all panels
 region_order_p = catch_by_region_prawn %>%
@@ -296,7 +316,7 @@ cols_p = cols_full_p[(n_extra + 1):length(cols_full_p)]
 names(cols_p) = region_order_p
 
 plot_region_panel_prawn = function(data, yvar, ylab, main, show_legend = FALSE) {
-  plot(range(data$year), range(data[[yvar]], na.rm = TRUE),
+  plot(range(data$year), range(data[[yvar]], na.rm = TRUE), ylim=c(0,1.2*max(data[[yvar]], na.rm=TRUE)),
        type = "n", xlab = "", ylab = ylab, bty = "l", las = 1, main = main)
   for (r in region_order_p) {
     dd = data[data$region == r, ]
@@ -315,3 +335,196 @@ plot_region_panel_prawn(catch_by_region_prawn, "weight_landed", "weight landed (
 plot_region_panel_prawn(catch_by_region_prawn, "num_traps_hauled", "traps hauled", "Regional effort (traps hauled)")
 plot_region_panel_prawn(catch_by_region_prawn, "vessel_count", "vessel count", "Regional vessel count")
 dev.off()
+
+### figure 3: CPUE trends ###
+### CPUE (weight landed / traps hauled) - prawn ###
+
+# coastwide CPUE
+coastwide_prawn_catch = coastwide_prawn_catch %>%
+  mutate(cpue = coastwide_weight_landed / coastwide_num_traps_hauled)
+
+# regional CPUE
+catch_by_region_prawn = catch_by_region_prawn %>%
+  mutate(cpue = weight_landed / num_traps_hauled)
+
+png(here("figures","prawn_cpue.png"), width = 10, height = 4.5, units = "in", res = 300, pointsize = 12)
+par(mfrow = c(1, 2), mar = c(4, 5.5, 3, 1), mgp = c(3.8, 0.7, 0))
+
+# panel 1: coastwide CPUE
+plot(coastwide_prawn_catch$year, coastwide_prawn_catch$cpue,
+     type = "o", lwd = 2, pch = 16, col = "steelblue",
+     xlab = "", ylab = "CPUE (lbs / trap)", bty = "l", las = 1,
+     main = "Coastwide CPUE")
+
+# panel 2: regional CPUE
+plot_region_panel_prawn(catch_by_region_prawn, "cpue", "CPUE (lbs / trap)", "Regional CPUE", show_legend = TRUE)
+
+dev.off()
+
+################################################################################
+#### dive fisheries
+################################################################################
+
+# read in & clean data files
+dive = as.data.frame(read_csv(here("data-generated","2026-jul-dfo-catch-data-dive.csv"), skip=25))
+dive = dive[,1:8]
+names(dive) = c("fishery","species","year","PFMA","subarea","vessel_count","dive_time_minutes","total_landing_lbs")
+
+# fix inconsistent species code casing (e.g. "6bc" vs "6BC" for Red Urchin) for future use,
+# even though we're grouping by fishery (not species) below
+dive$species = toupper(dive$species)
+
+# clean privacy-masked values (total landing) and NULL entries (dive time)
+dive[which(dive$total_landing_lbs=="*" | dive$total_landing_lbs=="**"),]$total_landing_lbs = "NA"
+dive$total_landing_lbs = as.numeric(dive$total_landing_lbs)
+
+dive[which(dive$dive_time_minutes=="NULL"),]$dive_time_minutes = "NA"
+dive$dive_time_minutes = as.numeric(dive$dive_time_minutes)
+
+# filter to the four focal fisheries (drops Purple Urchin, Octopus by Dive, Scallop by Dive)
+# "Geoduck and Horseclam" contains two species codes (84C, 76D); grouping by fishery
+# rather than species keeps these combined, as intended
+focal_fisheries = c("Geoduck and Horseclam", "Red Urchin", "Green Urchin", "Sea Cucumber")
+dive = dive %>% filter(fishery %in% focal_fisheries)
+
+# generic regional panel plotting function, reused across every fishery in the loop
+plot_region_panel_generic = function(data, yvar, ylab, main, region_order, cols,
+                                     show_legend = FALSE, legend_pos = "topleft") {
+  plot(range(data$year), range(data[[yvar]], na.rm = TRUE),
+       ylim = c(0, 1.2 * max(data[[yvar]], na.rm = TRUE)),
+       type = "n", xlab = "", ylab = ylab, bty = "l", las = 1, main = main)
+  for (r in region_order) {
+    dd = data[data$region == r, ]
+    lines(dd$year, dd[[yvar]], lwd = 2, col = cols[r])
+    points(dd$year, dd[[yvar]], pch = 21, bg = cols[r], col = "black", cex = 0.9)
+  }
+  if (show_legend) {
+    legend(legend_pos, legend = region_order, pt.bg = cols, pch = 21, col = "black",
+           lwd = 1, cex = 0.7, bty = "n", title = "Region (low to high avg. catch)")
+  }
+}
+
+for (f in focal_fisheries) {
+  
+  fishery_slug = tolower(gsub(" ", "_", f))
+  d_species = dive %>% filter(fishery == f)
+  
+  ### --- coastwide trends --- ###
+  coastwide = d_species %>%
+    filter(subarea == "Total") %>%
+    group_by(year) %>%
+    summarise(coastwide_weight_landed = sum_or_na(total_landing_lbs),
+              coastwide_dive_time = sum_or_na(dive_time_minutes),
+              coastwide_vessel_count = sum_or_na(vessel_count)) %>%
+    complete(year = full_seq(year, 1))
+  
+  png(here("figures", paste0("dive_", fishery_slug, "_coastwide_trends.png")),
+      width = 9, height = 3, units = "in", res = 300, pointsize = 14)
+  par(mfrow = c(1, 3), mar = c(4, 5.5, 3, 1), mgp = c(4, 0.5, 0))
+  plot(coastwide$year, coastwide$coastwide_weight_landed,
+       type = "o", lwd = 2, pch = 16, col = "darkgreen",
+       xlab = "year", ylab = "weight landed (lbs)", bty = "l", las = 1,
+       main = "Coastwide landed weight")
+  plot(coastwide$year, coastwide$coastwide_dive_time,
+       type = "o", lwd = 2, pch = 16, col = "darkorange", bty = "l", las = 1,
+       xlab = "year", ylab = "dive time (minutes)",
+       main = "Coastwide effort (dive time)")
+  plot(coastwide$year, coastwide$coastwide_vessel_count,
+       type = "o", lwd = 2, pch = 16, col = "firebrick", bty = "l", las = 1,
+       xlab = "year", ylab = "vessel count",
+       main = "Coastwide vessel count")
+  dev.off()
+  
+  ### --- catch by PFMA (all areas, ranked groups of 12) --- ###
+  catch_by_pfma = d_species %>%
+    filter(subarea == "Total") %>%
+    group_by(PFMA, year) %>%
+    summarise(total_landing_lbs = sum_or_na(total_landing_lbs), .groups = "drop") %>%
+    complete(PFMA, year = full_seq(year, 1))
+  
+  pfma_totals = catch_by_pfma %>%
+    group_by(PFMA) %>%
+    summarise(avg_weight = mean(total_landing_lbs, na.rm = TRUE)) %>%
+    arrange(desc(avg_weight)) %>%
+    mutate(rank_group = ceiling(row_number() / 12))
+  
+  catch_by_pfma_ranked = catch_by_pfma %>%
+    left_join(pfma_totals %>% select(PFMA, rank_group), by = "PFMA")
+  
+  n_groups = max(pfma_totals$rank_group)
+  ncol_panels = ceiling(sqrt(n_groups))
+  nrow_panels = ceiling(n_groups / ncol_panels)
+  panel_titles = paste0("PFMAs ", (0:(n_groups-1))*12 + 1, "\u2013", pmin((1:n_groups)*12, nrow(pfma_totals)))
+  panel_titles[1] = "Top 12 PFMAs (by avg. catch)"
+  
+  png(here("figures", paste0("dive_", fishery_slug, "_catch_by_pfma_ranked_groups.png")),
+      width = 5 * ncol_panels, height = 4 * nrow_panels, units = "in", res = 300, pointsize = 12)
+  par(mfrow = c(nrow_panels, ncol_panels), mar = c(4, 5.5, 3, 1), mgp = c(3.5, 0.7, 0))
+  for (i in 1:n_groups) {
+    d_group = catch_by_pfma_ranked %>% filter(rank_group == i)
+    group_totals = pfma_totals %>% filter(rank_group == i) %>% arrange(avg_weight)
+    pfmas_i = group_totals$PFMA
+    cols_pfma = hcl.colors(length(pfmas_i), palette = "YlOrRd", rev = TRUE)
+    
+    plot(range(d_group$year), range(d_group$total_landing_lbs, na.rm = TRUE),
+         type = "n", xlab = "", ylab = "weight landed (lbs)", bty = "l", las = 1,
+         main = panel_titles[i])
+    for (j in seq_along(pfmas_i)) {
+      dd = d_group[d_group$PFMA == pfmas_i[j], ]
+      lines(dd$year, dd$total_landing_lbs, lwd = 1.5, col = cols_pfma[j])
+      points(dd$year, dd$total_landing_lbs, pch = 21, bg = cols_pfma[j], col = "black", cex = 0.7)
+    }
+    legend("topleft", legend = pfmas_i, pt.bg = cols_pfma, pch = 21, col = "black", lwd = 1,
+           cex = 0.7, ncol = 2, bty = "n", title = "PFMA (low to high catch)")
+  }
+  dev.off()
+  
+  ### --- catch by region --- ###
+  catch_by_region = d_species %>%
+    filter(subarea == "Total", PFMA != "0") %>%
+    mutate(PFMA = as.character(PFMA)) %>%
+    left_join(region_lookup, by = "PFMA") %>%
+    group_by(region, year) %>%
+    summarise(weight_landed = sum_or_na(total_landing_lbs),
+              dive_time = sum_or_na(dive_time_minutes),
+              vessel_count = sum_or_na(vessel_count),
+              .groups = "drop") %>%
+    complete(region, year = full_seq(year, 1))
+  
+  region_order = catch_by_region %>%
+    group_by(region) %>%
+    summarise(avg_weight = mean(weight_landed, na.rm = TRUE)) %>%
+    arrange(avg_weight) %>%
+    pull(region)
+  
+  n_extra = 3
+  cols_full = hcl.colors(length(region_order) + n_extra, palette = "YlOrRd", rev = TRUE)
+  cols = cols_full[(n_extra + 1):length(cols_full)]
+  names(cols) = region_order
+  
+  png(here("figures", paste0("dive_", fishery_slug, "_catch_by_region_panels.png")),
+      width = 12, height = 4.5, units = "in", res = 300, pointsize = 12)
+  par(mfrow = c(1, 3), mar = c(4, 5.5, 3, 1), mgp = c(3.8, 0.7, 0))
+  plot_region_panel_generic(catch_by_region, "weight_landed", "weight landed (lbs)",
+                            "Regional landed weight", region_order, cols, show_legend = TRUE)
+  plot_region_panel_generic(catch_by_region, "dive_time", "dive time (minutes)",
+                            "Regional effort (dive time)", region_order, cols)
+  plot_region_panel_generic(catch_by_region, "vessel_count", "vessel count",
+                            "Regional vessel count", region_order, cols)
+  dev.off()
+  
+  ### --- CPUE --- ###
+  coastwide = coastwide %>% mutate(cpue = coastwide_weight_landed / coastwide_dive_time)
+  catch_by_region = catch_by_region %>% mutate(cpue = weight_landed / dive_time)
+  
+  png(here("figures", paste0("dive_", fishery_slug, "_cpue.png")),
+      width = 10, height = 4.5, units = "in", res = 300, pointsize = 12)
+  par(mfrow = c(1, 2), mar = c(4, 5.5, 3, 1), mgp = c(3.8, 0.7, 0))
+  plot(coastwide$year, coastwide$cpue,
+       type = "o", lwd = 2, pch = 16, col = "steelblue",
+       xlab = "", ylab = "CPUE (lbs / minute dive time)", bty = "l", las = 1,
+       main = "Coastwide CPUE")
+  plot_region_panel_generic(catch_by_region, "cpue", "CPUE (lbs / minute dive time)",
+                            "Regional CPUE", region_order, cols, show_legend = TRUE)
+  dev.off()
+}
